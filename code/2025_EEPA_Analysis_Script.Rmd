@@ -1,0 +1,680 @@
+---
+title: "Analysis script to reproduce results for the 4DSW scoping review publication submitted to EEPA"
+author: "Shaina Trevino"
+date: "3/31/2025"
+output: html_document
+---
+
+```{r renv}
+# To manually load the reproducible environment
+if (!require("renv")) install.packages("renv")
+renv::restore()
+
+```
+
+
+```{r setup, include=FALSE}
+# Install and load packages
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(janitor, tidyverse, rio, here, readxl, gt)
+
+```
+
+## Overview
+
+This document reproduces the quantitative results reported in our publication submitted to EEPA. This file is not intended to be knitted - it is designed to be run chunk by chunk to reproduce results. The first two sections are importing and data cleaning code followed by code to reproduce our quantitative results. Code/results are presented in the order in which results are presented in the manuscript with corresponding subheadings. Data were exported on 1/29/2025 for analysis. All data files were exported directly from DistillerSR.
+
+```{r import}
+# Import study characteristics
+raw_df <- import(here("data", "4dsw_study_data.xlsx")) %>% 
+  janitor::clean_names() %>% 
+  distinct(across(-user), .keep_all = TRUE) 
+
+# Import eligibility data
+elig_df <- read_excel(here("data", "4dsw_eligibility_data.xlsx")) %>% 
+  clean_names()
+
+# Import additional reports of studies
+linked_df <- import(here("data", "4dsw_linked_references.xlsx")) %>% 
+  janitor::clean_names()
+
+# Import citations for all references
+cit_df <- import(here("data", "4dsw_all_citations.xlsx")) %>% 
+  janitor::clean_names()
+
+
+```
+
+```{r tidy}
+# Tidy eligibility data
+elig_df <- elig_df %>% 
+  mutate(citation_cleaned = citation %>%
+           # Remove all text between and including ##
+           gsub("#[^#]*#", "", .) %>%
+           # Replace multiple spaces with a single space
+           gsub("\\s+", " ", .) %>%
+           # Remove periods except the last one
+           gsub("\\.(?![^.]*$)", "", ., perl = TRUE) %>%
+           # Remove trailing spaces
+           gsub("\\s+$", "", .) %>%
+           # Remove instances of () and (), 
+           gsub("\\(\\),\\s*", "", .) %>%
+           gsub("\\(\\)", "", .) %>%
+           # Replace ", ." with "."
+           gsub(",\\s*\\.", ".", .)) %>% 
+  #update 3/31/25 remove references added after date of data in publication
+  filter(refid < 4692)
+
+# Tidy reference data
+cit_td <- cit_df %>% 
+  mutate(citation_cleaned = bibliography %>%
+           # Remove all text between and including ##
+           gsub("#[^#]*#", "", .) %>%
+           # Replace multiple spaces with a single space
+           gsub("\\s+", " ", .) %>%
+           # Remove periods except the last one
+           gsub("\\.(?![^.]*$)", "", ., perl = TRUE) %>%
+           # Remove trailing spaces
+           gsub("\\s+$", "", .) %>%
+           # Remove instances of () and (), 
+           gsub("\\(\\),\\s*", "", .) %>%
+           gsub("\\(\\)", "", .) %>%
+           # Replace ", ." with "."
+           gsub(",\\s*\\.", ".", .) %>% 
+           # Replace " ." with "."
+           gsub("\\s*\\.", ".", .) %>% 
+           # Replace " ," with ","
+           gsub("\\s*\\,", ",", .)) %>% 
+  select(-bibliography) %>% 
+  #update 3/31/25 remove references added after date of data in publication
+  filter(refid < 4692)
+
+# Transform linked references to combine multiple reports per study
+linked_td <- linked_df %>% 
+  select(ref_id, linked_refid) %>% 
+  rowwise() %>% 
+  mutate(main_refid = ref_id) %>%
+  reframe(main_refid = main_refid,
+          refid = c(ref_id, linked_refid)) %>%
+  ungroup() %>% 
+  distinct() %>% 
+  left_join(cit_td) %>% 
+  group_by(main_refid) %>% 
+  summarize(all_reports = paste(citation_cleaned, collapse = " !!! "),
+            all_refids = paste(refid, collapse = ", ")) %>% 
+  ungroup() %>% 
+  mutate(all_reports = str_replace_all(all_reports, "!!! ", "<br><br>")) %>% 
+  rename(refid = main_refid) %>% 
+  mutate(refid = as.character(refid))
+
+# Tidy study characteristics
+df_long <- raw_df %>%
+  # Select relevant columns
+  select(refid, starts_with("community"), starts_with("state"), starts_with("grade"),
+         starts_with("school"), starts_with("effectiveness"), starts_with("equity"), 
+         starts_with("evidence"), -effectiveness_approach, starts_with("stakeholder_groups_select"), starts_with("data_years_select")) %>% 
+  # Pivot to long format
+  pivot_longer(cols = -refid, names_to = "variable", values_to = "response") %>%
+  # Extract and clean the variable categories
+  mutate(
+    value = sub(".*_", "", variable), # Extract the suffix of the variable name
+    value = str_to_title(value), # Capitalize for consistency
+    value = ifelse(value == "Unknown", "Not Reported", value), # Rename "Unknown" to "Not Reported"
+    response = str_remove_all(response, "; -999|-999;"), # Clean invalid codes
+    response = str_squish(response), # Remove unnecessary spaces
+    # If a response exists (non-NA), use the response itself as the category
+    category = case_when(
+      !is.na(response) & response != "" ~ value,
+      TRUE ~ NA_character_
+    ),
+    # Create new variable names for grouping
+    new_var_name = case_when(
+      str_detect(variable, "^community") ~ "community", 
+      str_detect(variable, "^state") ~ "state",
+      str_detect(variable, "^grade") ~ "grade_level",
+      str_detect(variable, "^school") ~ "school_level",
+      str_detect(variable, "^effectiveness") ~ "effectiveness",
+      str_detect(variable, "^equity") ~ "equity",
+      str_detect(variable, "^evidence") ~ "evidence_domain",
+      str_detect(variable, "^data_years_select") ~ "data_years",
+      str_detect(variable, "^stakeholder_groups_select") ~ "stakeholder_groups",
+      TRUE ~ variable
+    ),
+    # Fix specific state naming issues
+    category = case_when(
+      category == "Newmexico" ~ "New Mexico",
+      category == "Southdakota" ~ "South Dakota",
+      category == "Northdakota" ~ "North Dakota",
+      category == "Northcarolina" ~ "North Carolina",
+      category == "Southcarolina" ~ "South Carolina",
+      category == "Newhampshire" ~ "New Hampshire",
+      TRUE ~ category
+    )
+  )
+
+# Transform for calculations
+td_longvar <- df_long %>%
+  group_by(refid, new_var_name) %>%
+  summarise(category_value = paste(category[!is.na(category)], collapse = "; "), .groups = "drop_last") %>%
+  pivot_wider(names_from = new_var_name, values_from = category_value) %>% 
+  ungroup() %>% 
+  mutate(data_years = ifelse(data_years == "999", "Not Reported", data_years))
+
+
+
+# List of single variables (to aggregate across id only)
+single_cat_vars <- c("author_last_name", "publication_year", "publication_type", "publisher", "student_type", "student_discipline",
+                     "effectiveness_approach")
+
+# Subset of single single aggregated variables
+single_df <- raw_df %>%
+ select(refid, all_of(single_cat_vars))
+
+# Transform fifth day data for table
+fif_td <- raw_df %>% 
+  pivot_longer(cols = fifthday_child_care:fifthday_not_reported, 
+               names_to = "variable", 
+               values_to = "response") %>% 
+  mutate(response = str_replace_all(response, 
+                                    c("Not reported" = "Not Reported"))) %>% 
+  group_by(refid) %>%
+  summarise(fifth_day_activities = paste(response[!is.na(response)], collapse = "; "), .groups = "drop_last") %>%
+  ungroup()
+
+# Transform additional data for table
+race_td <- raw_df %>% 
+  mutate(raceethnicity_checkbox_other_please_specify = str_remove_all(raceethnicity_checkbox_other_please_specify, "\\s*\\(please specify\\)")) %>% 
+  pivot_longer(cols = raceethnicity_checkbox_american_indian_and_or_alaska_native:raceethnicity_checkbox_other_please_specify, 
+               names_to = "variable", 
+               values_to = "response") %>% 
+  group_by(refid) %>%
+  summarise(race_ethnicity = paste(response[!is.na(response)], collapse = "; "), .groups = "drop_last") %>%
+  ungroup() %>% 
+  mutate(race_ethnicity = ifelse(race_ethnicity == "", "Not Reported", race_ethnicity))
+
+# Extract cleaned citation from elig_df
+elig_subset <- elig_df %>% 
+  dplyr::select(refid, citation_cleaned)
+
+# Merge all study data together
+jd <- single_df %>% 
+  left_join(td_longvar) %>% 
+  left_join(fif_td) %>% 
+  # left_join(add_td) %>% 
+  left_join(race_td) %>% 
+  # left_join(ref_td) %>% 
+  left_join(elig_subset) %>% 
+  left_join(select(cit_df, refid, title), by = "refid")
+
+# Correct formatting
+td_study <- jd %>% 
+  mutate_all(~ ifelse(is.na(.) | .x == -999 | . == "", "Not Reported", .)) %>% 
+  mutate_all(~ str_remove_all(as.character(.), "-999; |; -999")) %>% 
+  mutate_all(~ str_remove_all(as.character(.), "Not Reported; |; Not Reported")) %>% 
+  mutate(equity = str_replace_all(equity, c("Raceethnicity" = "Race/Ethnicity", "Sexgender" = "Sex/Gender", "Ell" = "ELL", 
+                                            "Ses" = "SES", "Specialeducation" = "Special Education"))) %>% 
+   mutate(study_design = case_when(effectiveness_approach == "Hierarchical Linear Modeling" ~ "Between Groups - With Controls",
+                                  effectiveness_approach == "Regression Adjustment" ~ "Between Groups - With Controls",
+                                  effectiveness_approach == "ANOVA" ~ "Between Groups - Without Controls", 
+                                  effectiveness_approach == "MANOVA" ~ "Between Groups - Without Controls", 
+                                  effectiveness_approach == "Mann-Whitney U test" ~ "Between Groups - Without Controls", 
+                                  effectiveness_approach == "T-Test" ~ "Between Groups - Without Controls", 
+                                  effectiveness_approach == "No" ~ "Not Reported",
+                                  TRUE ~ effectiveness_approach)) %>% 
+  mutate(study_design = ifelse(study_design == "Not Reported", "Not Applicable", study_design),
+         stakeholder_groups = ifelse(stakeholder_groups == "Not Reported", "Not Applicable", stakeholder_groups),
+         outcome_domain_studied = str_replace_all(effectiveness, c("Retention" = "Staff/Teacher Retention",
+                                                                   "Climate" = "School Climate",
+                                                                   "Incidents" = "School Disciplinary Incidents",
+                                                                   "Households" = "Household Impacts",
+                                                                   "Crime" = "Criminal Activity")),
+         equity_domain_studied = str_replace_all(equity, c("Age" = "Age or Grade Level",
+                                                                   "Rurality" = "Community Type (Rurality)",
+                                                                   "ELL" = "English Language Learner",
+                                                                   "Gifted" = "Gifted Student Status",
+                                                                   "Immigrant" = "Immigration Status",
+                                                                   "Not Reported" = "Not Reported or Applicable")),
+         study_author_year = paste(author_last_name, publication_year),
+         pub_type = ifelse(publication_type == "Student", paste0(publication_type, ": ", student_type), publication_type)) 
+
+```
+
+
+## Results
+
+### Search and Eligibility Results
+
+This section includes code to reproduce the number of records from our search and results from eligibility screening (for PRISMA flow diagram reporting in Figure 1). The number of duplicate references removed were taken directly from DistillerSR's quarantine (from the duplicate detection feature). Bolded results are those reported in text, in addition to the PRISMA flow diagram.
+
+Number of records identified from search & number of duplicates:
+
+```{r num-search}
+# Specify number of duplicates removed in DistillerSR
+num_duplicates <- 480L
+
+# Calculate records in full search (records screened + duplicates)
+nrow(cit_td) + num_duplicates
+```
+
+Number of records screened/**Number of unique citations**:
+
+```{r num-screen}
+# Number of total records screened in DistillerSR
+nrow(cit_td)
+```
+
+**Number of records excluded:** 
+
+```{r num-drop}
+# Number of records dropped at TA screening
+sum(elig_df$study_screening_decision == "Drop")
+```
+
+Number of reports sought for retrieval:
+
+```{r num-keep}
+# Number of records kept at TA screening
+sum(elig_df$study_screening_decision == "Keep") + 1 #Difference due to one reference that was linked to another study before TA screening was completed
+```
+
+Number of reports not retrieved:
+
+```{r num-nopdf}
+# Number of reports that we could not retrieve PDF for
+sum(elig_df$pdf_retrieved == "No", na.rm = TRUE)
+```
+
+**Number of reports assessed for full-text eligibility:**
+
+```{r num-elig-assessed}
+# Number of reports that were assessed for eligibility
+sum(!is.na(elig_df$study_eligibility_decision)) + 1 #Difference due to one reference that was linked to another study before TA screening was completed
+```
+
+**Number of reports excluded:**
+
+```{r num-notelig}
+# Number of reports that were not eligible during full-text assessment
+sum(elig_df$study_eligibility_decision == "Not Eligible", na.rm = TRUE) + 1 #Difference due to one reference that was linked to another study before TA screening was completed
+```
+
+Exclude reasons:
+
+```{r freq-exclude-reason}
+elig_df %>% 
+  filter(!is.na(study_exclude_reason)) %>% 
+  count(study_exclude_reason) %>% 
+  #Difference due to one reference that was linked to another study before TA screening was completed
+  mutate(n = case_when(
+    study_exclude_reason == "Ineligible study design - not empirical research" ~ n + 1,
+    TRUE ~ n))
+
+```
+
+**Number of studies included in the review:**
+
+```{r num-elig-studies}
+# Number of eligible studies for data extraction
+nrow(td_study)
+```
+
+**Number of total reports of included studies:**
+
+```{r num-elig-reports}
+# Number of reports that were eligible during full-text assessment
+sum(elig_df$study_eligibility_decision == "Eligible", na.rm = TRUE)
+```
+
+### Characteristics of Sources of Evidence
+
+```{r tbl-results}
+# Create functions to calculate numbers reported in Table 1 and 2
+# Transform data for table
+data <- raw_df %>% 
+  mutate(across(where(is.character), ~ na_if(., "")))
+
+# Define function to summarize checkbox variables
+summarize_checkboxes <- function(data, prefix, filter_condition = NULL) {
+  filtered_data <- if (!is.null(filter_condition)) {
+    data %>% filter(!!rlang::parse_expr(filter_condition))
+  } else {
+    data
+  }
+  
+  filtered_data %>%
+    select(starts_with(prefix)) %>%
+    summarise(across(everything(), ~ sum(!is.na(.)), .names = "N_{col}")) %>%
+    pivot_longer(cols = everything(), names_to = "Category", values_to = "N") %>%
+    mutate(
+      Percentage = round((N / nrow(filtered_data)) * 100, 1),
+      Denominator = nrow(filtered_data)  # Add the denominator
+    )
+}
+  
+# Apply function to variable groups
+community_summary <- summarize_checkboxes(data, "community_")
+state_summary <- summarize_checkboxes(data, "state_")
+grade_summary <- summarize_checkboxes(data, "grade_")
+school_summary <- summarize_checkboxes(data, "school_")
+fifthday_summary <- summarize_checkboxes(data, "fifthday_")
+evidence_summary <- summarize_checkboxes(data, "evidence_")
+outcome_summary <- summarize_checkboxes(data, "effectiveness_", filter_condition = "!is.na(evidence_effectiveness)") #demon = studies reporting effectiveness
+equity_summary <- summarize_checkboxes(data, "equity_", filter_condition = "!is.na(evidence_equity)") #demon = studies reporting equity
+stakeholder_summary <- summarize_checkboxes(data, "stakeholder_groups_select_", filter_condition = "!is.na(evidence_acceptability)") #demon = studies reporting acceptability
+
+
+
+# Create function to summarize single-response categorical variables
+categorical_summary <- function(data, var, filter_condition = NULL) {
+  filtered_data <- if (!is.null(filter_condition)) {
+    data %>% filter(!!rlang::parse_expr(filter_condition))
+  } else {
+    data
+  }
+  
+  filtered_data %>%
+    count(!!sym(var)) %>%
+    mutate(
+      Percentage = round((n / nrow(filtered_data)) * 100, 1),
+      Denominator = nrow(filtered_data)  
+    ) %>%
+    rename(Category = !!sym(var), N = n)
+}
+ 
+# Apply function
+publication_summary <- categorical_summary(data, "publication_type")
+student_type_summary <- categorical_summary(data, "student_type", filter_condition = "publication_type == 'Student'")
+student_disc_summary <- categorical_summary(data, "student_discipline", filter_condition = "publication_type == 'Student'")
+race_summary <- categorical_summary(data, "raceethnicity_majority")
+approach_summary <- categorical_summary(data, "effectiveness_approach", filter_condition = "!is.na(evidence_effectiveness)")
+
+
+# Create function to summarize numerical variables (median and range)
+numerical_summary <- function(data, var) {
+  data %>%
+    summarise(
+      Median = median(!!sym(var), na.rm = TRUE),
+      Range = paste0(min(!!sym(var), na.rm = TRUE), "-", max(!!sym(var), na.rm = TRUE))
+    )
+}
+
+# Apply function
+publication_year_summary <- numerical_summary(data, "publication_year")
+
+# For data_years, as checkbox variable
+# Combine all year columns into a single column
+years_summary <- data %>%
+  select(starts_with("data_years_select_")) %>%  # Select all year-related columns
+  pivot_longer(cols = everything(), names_to = "year_variable", values_to = "year") %>%  # Reshape to long format
+  mutate(year = as.numeric(year)) %>%  # Ensure the years are numeric
+  filter(!is.na(year) & year != -999)  # Remove NA and -999 values
+
+# Calculate median and range
+summary_data_years <- years_summary %>%
+  summarise(
+    Median = median(year, na.rm = TRUE),
+    Range = paste0(min(year, na.rm = TRUE), "-", max(year, na.rm = TRUE))
+  )
+
+
+```
+
+Dates included studies were published:
+
+```{r sum-year}
+# Median and Range for publication year of included studies
+print(publication_year_summary)
+```
+
+Publication types of included studies:
+
+```{r sum-pubtype}
+# Frequency table for type of publication
+print(publication_summary)
+```
+
+Student publication types: 
+
+```{r sum-studtype}
+# Frequency table for student publication types
+print(student_type_summary)
+```
+
+Student disciplines for student publications:
+
+```{r sum-studdis}
+# Frequency table for student publication disciplines
+print(student_disc_summary)
+```
+
+Dates studies collected and analyzed data:
+
+```{r sum-datayrs}
+# Median and Range for data years
+print(summary_data_years)
+```
+
+Community types among included studies:
+
+```{r sum-rurality}
+# Frequency table for community type
+print(community_summary)
+```
+
+States included:
+
+```{r sum-states}
+# Frequency table for all states
+print(state_summary, n = 50) %>% arrange(desc(N))
+```
+
+School grade level included:
+
+```{r sum-schl}
+# Frequency table for school grade level
+print(school_summary)
+```
+
+Student grades included:
+
+```{r sum-grade}
+# Frequency table for student grade level
+print(grade_summary)
+```
+
+Student race and ethnicity:
+
+```{r sum-race}
+# Frequency table for student race/ethnicity
+print(race_summary)
+```
+
+Fifth day activity offered by schools:
+
+```{r sum-fd}
+# Frequency table for fifth day activity
+print(fifthday_summary)
+```
+
+### Types of Empirical Research Evidence
+
+Number of studies reporting information on effectiveness: 
+
+```{r num-effectiveness}
+# Number of studies reporting effectiveness
+print(transform(outcome_summary[1,], Percentage = round(N / nrow(data) * 100, 0), Denominator = nrow(data))) 
+```
+
+Among effectiveness studies, methodological approaches used:
+
+```{r sum-design}
+# Frequency table of study design
+print(approach_summary) %>% arrange(desc(N))
+```
+
+Among effectiveness studies, outcome domains:
+
+```{r sum-outcome}
+# Frequency table of outcome domains
+print(outcome_summary) %>% filter(Category != "N_effectiveness_approach") %>% arrange(desc(N))
+```
+
+Among effectiveness studies, number reporting equity:
+
+```{r num-equity}
+# Number of effectiveness studies reporting equity domain
+print(transform(evidence_summary[3,], Percentage = round(N / nrow(data %>% filter(!is.na(evidence_effectiveness))) * 100, 0))) 
+```
+
+Among equity studies, equity domains:
+
+```{r sum-equity}
+# Frequency table for equity domains
+print(equity_summary)
+```
+
+Number of studies reporting info on implementation: 
+
+```{r num-implementation}
+# Number of studies reporting any info on acceptability, feasibility, or resource use
+n_implementability <- data %>%
+  filter(
+    !is.na(evidence_acceptability) |
+    !is.na(evidence_feasibility) |
+    !is.na(evidence_resource)
+  ) %>%
+  distinct(refid) %>%
+  nrow()
+
+paste0(n_implementability, " (", round((n_implementability / nrow(data)) * 100, 1), "%) ", "studies reported implementability")
+
+```
+
+Among studies reporting implementation, number of studies reporting evidence on acceptability: 
+
+```{r num-acceptability}
+# Number of studies reporting acceptability (from studies reporting implementation)
+print(transform(evidence_summary[1,], Percentage = round(N / n_implementability * 100, 0), Denominator = n_implementability)) 
+```
+
+Among acceptability studies, target of acceptability:
+
+```{r sum-acceptability}
+# Frequency of stakeholder groups targeted for acceptability domain
+print(arrange(stakeholder_summary, desc(N)), n = 30) 
+```
+
+Among studies reporting implementation, number of studies reporting evidence on feasibility: 
+
+```{r num-feasibility}
+# Number of studies reporting feasibility (from studies reporting implementation)
+print(transform(evidence_summary[4,], Percentage = round(N / n_implementability * 100, 0), Denominator = n_implementability)) 
+```
+
+Among studies reporting implementation, number of studies reporting evidence on resource use: 
+
+```{r num-resource}
+# Number of studies reporting resource use (from studies reporting implementation)
+print(transform(evidence_summary[6,], Percentage = round(N / n_implementability * 100, 0), Denominator = n_implementability)) 
+```
+
+Number of studies reporting a policy priority: 
+
+```{r num-priority}
+# Number of studies reporting policy priority (out of all studies)
+print(evidence_summary[5,])
+```
+
+## Figures
+
+### Figure 1. Flow Diagram for Selection of Sources of Evidence
+
+Figure 1 was created in word to follow the PRISMA 2020 reporting template. Code to reproduce the numbers reported in Figure 1 can be found in the "Search and Eligibility Results" section above.  
+
+## Tables
+
+The code below will reproduce the values we reported within tables in the manuscript. These results will be generated in the console - no tables will be generated or saved as outputs. 
+
+### Table 1. Characteristics of Included Sources of Evidence
+
+Results for Table 1
+
+```{r print-tbl1}
+# Print Table 1 info
+print(publication_summary)
+print(community_summary)
+print(school_summary)
+print(race_summary)
+print(fifthday_summary)
+
+# Table note
+print(publication_year_summary)
+print(summary_data_years)
+
+```
+
+
+### Table 2. Available Empirical Research Evidence on Four-Day School Weeks
+
+Results for Table 2
+
+```{r print-tbl2}
+# Print Table 2 info
+evidence_summary %>%
+  mutate(Denominator = if_else(Category == "N_evidence_equity",
+                               N[Category == "N_evidence_effectiveness"],
+                               Denominator),
+         Percentage = if_else(Category == "N_evidence_equity",
+                              round(N / Denominator * 100, 1),
+                              Percentage))
+
+```
+
+
+## Supplements
+
+The code below will reproduce the values we reported in supplemental tables. These results will be generated in the console - no tables will be generated or saved as outputs. 
+
+### Online Supplement 1. Search Strategy
+
+There is no code to produce S1 since it was created in Word to list our search strategy.
+
+### Online Supplement 2. Characteristics of Included Sources of Evidence 
+
+Results for S2
+
+```{r print-supp1}
+# Print S2 info
+print(publication_summary)
+print(student_type_summary)
+print(student_disc_summary) 
+print(community_summary)
+print(state_summary, n = 50)
+print(grade_summary)
+print(school_summary)
+print(race_summary)
+print(fifthday_summary)
+
+# Table note
+print(publication_year_summary)
+print(summary_data_years)
+
+```
+
+### Online Supplement 3. Available Empirical Research Evidence on Four-Day School Weeks 
+
+Results for S3 
+
+```{r print-supp2}
+# Print Table 2 info
+print(evidence_summary[1,])
+print(stakeholder_summary, n = 30) 
+print(evidence_summary[2,])
+print(approach_summary) 
+print(outcome_summary) 
+print(transform(evidence_summary[3,], Percentage = round(N / nrow(data %>% filter(!is.na(evidence_effectiveness))) * 100, 0), Denominator = nrow(data %>% filter(!is.na(evidence_effectiveness))))) 
+print(equity_summary)
+print(slice(evidence_summary, -1:-3))
+
+```
+
