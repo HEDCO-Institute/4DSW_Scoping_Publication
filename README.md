@@ -3,7 +3,7 @@
 <!-- TODO: UPDATE WITH JOURNAL NAME AND DATE AFTER PUBLICATION--->
 
 **Date of Release:** 4/16/2025  
-**Title:** The Four-Day School Week at K-12 Schools in the United States: A Scoping Review of Empirical Research Evidence
+**Title:** The Four-Day School Week at K-12 Schools in the United States: A Scoping Review of Empirical Research Evidence <br>
 **OSF Component:** <https://osf.io/5rgps/> <br> 
 **Package Author:** Shaina Trevino 
 
