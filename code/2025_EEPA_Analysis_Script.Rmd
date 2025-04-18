@@ -13,7 +13,14 @@ output: html_document
 
 ```{r renv}
 # Manually load the reproducible environment
-renv::restore(prompt = FALSE)
+# If this doesn't work the first time, try running it in the console
+renv::restore()
+
+# If you are having issues restoring renv, uncomment and run this code (or try installing Rtools)
+#options(pkgType = "binary")
+#renv::restore()
+
+# If you are still having issues, you should be able to run the next code chunk to manually install and load required packages, but versions may differ
 
 ```
 
