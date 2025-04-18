@@ -5,13 +5,15 @@ date: "3/31/2025"
 output: html_document
 ---
 
-```{r renv}
-# To manually load the reproducible environment
-if (!require("renv")) install.packages("renv")
-renv::restore(prompt = FALSE)
+```{r troubleshoot}
+# If you are having trouble loading the environment. Open a new Rstudio (not this project) and install renv manually load the reproducible environment with the following code
+#if (!require("renv")) install.packages("renv")
 
-# If you are having issues installing renv, uncomment and run this code (or try installing Rtools)
-#options(pkgType = "binary")
+```
+
+```{r renv}
+# Manually load the reproducible environment
+renv::restore(prompt = FALSE)
 
 ```
 
