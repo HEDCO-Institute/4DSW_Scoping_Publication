@@ -8,7 +8,10 @@ output: html_document
 ```{r renv}
 # To manually load the reproducible environment
 if (!require("renv")) install.packages("renv")
-renv::restore()
+renv::restore(prompt = FALSE)
+
+# If you are having issues installing renv, uncomment and run this code (or try installing Rtools)
+#options(pkgType = "binary")
 
 ```
 
@@ -32,7 +35,7 @@ raw_df <- import(here("data", "4dsw_study_data.xlsx")) %>%
 
 # Import eligibility data
 elig_df <- read_excel(here("data", "4dsw_eligibility_data.xlsx")) %>% 
-  clean_names()
+  janitor::clean_names()
 
 # Import additional reports of studies
 linked_df <- import(here("data", "4dsw_linked_references.xlsx")) %>% 
