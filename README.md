@@ -45,7 +45,7 @@ The analysis script used to generate quantitative results for this publication i
 Please cite this version of the data as follows:
 
 <!-- TODO: INSERT CITATION/DOI AFTER PUBLICATION -->
-Trevino, S. D., Grant, S., Steinka-Fry, K., Day, E., Cabrera, B., Hamilton, S., Martinez, S., Chinn, L. K., & Tanner-Smith, E. E. (2025). Data for "The four-day school week at K-12 schools in the United States: A scoping review of empirical research evidence". OSF: <https://osf.io/5rgps/>
+Trevino, S. D., Grant, S., Steinka-Fry, K., Day, E., Cabrera, B., Hamilton, S., Martinez, S., Chinn, L. K., & Tanner-Smith, E. E. (2025). Data for "The four-day school week at K-12 schools in the United States: A scoping review of empirical research evidence". [OSF](https://osf.io/5rgps/). https://doi.org/10.17605/OSF.IO/5RGPS
 
 ### **Handling of Missing Data**
 - Missing values in the datasets are coded as `-999`, `Not Reported`, or `NA` and indicate those values were not reported in studies/reviews.
