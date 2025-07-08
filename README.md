@@ -93,7 +93,8 @@ Some components cannot be reproduced using the analysis script:
 
 ### **Known Discrepancies**
 <!-- TODO: INSERT CITATION/DOI AFTER PUBLICATION -->
-At this time, there are no known discrepancies between results from the analysis script and those reported in the publication/preprint.
+The following discrepancies were identified after publication through an external computational reproducibility check: 
+- The numbers reported for community type are slightly off. The manuscript erroneously states there were 32 suburban and 34 urban communities represented. In the data, there are only 31 suburban and 33 urban communities among included studies. 
 
 
 ## **🔹 Computational Requirements**
