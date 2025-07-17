@@ -560,6 +560,7 @@ n_implementability <- data %>%
 
 paste0(n_implementability, " (", round((n_implementability / nrow(data)) * 100, 1), "%) ", "studies reported implementability")
 
+
 ```
 
 Among studies reporting implementation, number of studies reporting evidence on acceptability: 
